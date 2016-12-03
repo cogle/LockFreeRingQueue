@@ -7,7 +7,7 @@
 template <typename T> class RingBuffer {
 public:
 
-	explicit RingBuffer(std::size_t capacity) : _buffer_capacity(capacity), _ring_buffer_array(new T[capacity]) {
+	explicit RingBuffer(std::size_t capacity) : _bufferCapacity(capacity), _ringBufferArray(new T[capacity]) {
 
 	}
 
@@ -15,16 +15,35 @@ public:
 
 	}
 
+	/*
+	Returns True if the push to buffer was successful.
+	If the push is unsuccessful returns False.
+	This design choice allows the user to be notified of whether or not
+	the transaction was completed. If it was not able to complete then the
+	user can sleep/yield or perform other work in the calling thread.
+	*/
 	template<typename U>
-	void Push(U && val)
+	bool push(U && val)
 	{
-		while (!TryPush(std::forward<U>(val)));
+		return tryPush(std::forward<U>(val));
 	}
 
-	T Pop() {
-		T val;
-		while (!TryPop(&val));
+	/*
+	Returns a shared_ptr to the value that is popped off the thread. If there is nothing
+	in the queue or the queue is full then the user is returned a nullptr, and can proceed accordingly.
+	*/
+	std::shared_ptr<T> pop() {
+		std::shared_ptr<T> * val(nullptr);
+		tryPop(&val);
 		return val;
+	}
+
+	std::size_t maxCapacity() {
+		return _bufferCapacity;
+	}
+
+	std::size_t curCapacity() {
+		return _curCapacity.load(std::memory_order_acquire);
 	}
 
 private:
@@ -36,41 +55,42 @@ private:
 
 	//Private Member Functions
 	template<typename U>
-	bool TryPush(U && val) {
-		const std::size_t current_write = write_position.load(std::memory_order_acquire);
-		const std::size_t current_read = read_position.load(std::memory_order_acquire);
-		const std::size_t next_write = increment_index(current_write);
+	bool tryPush(U && val) {
+		const std::size_t currentWrite = _writePosition.load(std::memory_order_acquire);
+		const std::size_t currentRead = _readPosition.load(std::memory_order_acquire);
+		const std::size_t nextWrite = incrementIndex(currentWrite);
 
-		if (next_write == current_read) { return false; }
+		if (nextWrite == current_read) { return false; }
 
-		_ring_buffer_array[current_write] = std::move(val);
-		write_position.store(next_write, std::memory_order_release);
-
-		return true;
-	}
-
-	bool TryPop(T * val) {
-		const std::size_t current_write = write_position.load(std::memory_order_acquire);
-		const std::size_t current_read = read_position.load(std::memory_order_acquire);
-
-		if (current_read == current_write) { return false; }
-
-		*val = std::move(_ring_buffer_array[current_read]);
-
-		const std::size_t next_read = increment_index(current_read);
-		read_position.store(next_read, std::memory_order_release);
+		_ringBufferArray[currentWrite] = std::move(val);
+		_writePosition.store(next_write, std::memory_order_release);
 
 		return true;
 	}
 
-	std::size_t increment_index(std::size_t index) {
-		return (index + 1) % _buffer_capacity;
+	void tryPop(T *& val) {
+		const std::size_t currentWrite = _writePosition.load(std::memory_order_acquire);
+		const std::size_t currentRead = _readPosition.load(std::memory_order_acquire);
+
+		if (currentRead == currentWrite) { return false; }
+
+		val = std::make_shared<T>(_ringBufferArray[currentRead]);
+
+		const std::size_t nextRead = incrementIndex(currentRead);
+		_readPosition.store(nextRead, std::memory_order_release);
+
+		return true;
+	}
+
+	std::size_t incrementIndex(std::size_t index) {
+		return (index + 1) % _bufferCapacity;
 	}
 
 	//Private Member Variables
-	std::atomic<std::size_t> read_position = 0;
-	std::atomic<std::size_t> write_position = 0;
+	std::atomic<std::size_t> _curCapacity = 0;
+	std::atomic<std::size_t> _readPosition = 0;
+	std::atomic<std::size_t> _writePosition = 0;
 
-	std::size_t _buffer_capacity;
-	std::unique_ptr<T[], RingBufferFree> _ring_buffer_array;
+	std::size_t _bufferCapacity;
+	std::unique_ptr<T[], RingBufferFree> _ringBufferArray;
 };
