@@ -7,7 +7,7 @@
 template <typename T> class RingBuffer {
 public:
 
-	explicit RingBuffer(std::size_t capacity) : _bufferCapacity(capacity), _ringBufferArray(new T[capacity + 1]) {
+	explicit RingBuffer(std::size_t capacity) : _bufferCapacity(capacity),  _ringBufferArray(new T[capacity + 1]) {
 
 	}
 
@@ -43,8 +43,8 @@ public:
 		return _bufferCapacity;
 	}
 
-	std::size_t curCapacity() {
-		return _curCapacity.load(std::memory_order_acquire);
+	std::size_t size() {
+		return _size.load(std::memory_order_acquire);
 	}
 
 private:
@@ -65,6 +65,7 @@ private:
 
 		_ringBufferArray[currentWrite] = std::move(val);
 		_writePosition.store(nextWrite, std::memory_order_release);
+		_size.store(_size.load(std::memory_order_acquire) + 1, std::memory_order_release);
 
 		return true;
 	}
@@ -80,15 +81,17 @@ private:
 
 		const std::size_t nextRead = incrementIndex(currentRead);
 		_readPosition.store(nextRead, std::memory_order_release);
+		_size.store(_size.load(std::memory_order_acquire) - 1, std::memory_order_release);
+
 		return val;
 	}
 
 	std::size_t incrementIndex(std::size_t index) {
-		return (index + 1) % _bufferCapacity;
+		return (index + 1) % (_bufferCapacity + 1);
 	}
 
 	//Private Member Variables
-	std::atomic<std::size_t> _curCapacity = 0;
+	std::atomic<std::size_t> _size = 0;
 	std::atomic<std::size_t> _readPosition = 0;
 	std::atomic<std::size_t> _writePosition = 0;
 
