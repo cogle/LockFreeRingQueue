@@ -44,7 +44,10 @@ public:
 	}
 
 	std::size_t size() {
-		return _size.load(std::memory_order_acquire);
+		const std::size_t writePos = __writePosition.load(std::memory_order_acquire);
+		const std::size_t readPos = _readPosition.load(std::memory_order_acquire);
+
+		return writePos > readPos ? (writePos - readPos) : (readPos - writePos);
 	}
 
 private:
@@ -65,7 +68,7 @@ private:
 
 		_ringBufferArray[currentWrite] = std::move(val);
 		_writePosition.store(nextWrite, std::memory_order_release);
-		_size.store(_size.load(std::memory_order_acquire) + 1, std::memory_order_release);
+
 
 		return true;
 	}
@@ -81,8 +84,7 @@ private:
 
 		const std::size_t nextRead = incrementIndex(currentRead);
 		_readPosition.store(nextRead, std::memory_order_release);
-		_size.store(_size.load(std::memory_order_acquire) - 1, std::memory_order_release);
-
+		
 		return val;
 	}
 
@@ -91,7 +93,6 @@ private:
 	}
 
 	//Private Member Variables
-	std::atomic<std::size_t> _size = 0;
 	std::atomic<std::size_t> _readPosition = 0;
 	std::atomic<std::size_t> _writePosition = 0;
 
